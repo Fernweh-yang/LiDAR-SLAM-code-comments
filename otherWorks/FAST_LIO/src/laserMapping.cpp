@@ -753,6 +753,7 @@ int main(int argc, char** argv)
     ros::init(argc, argv, "laserMapping");
     ros::NodeHandle nh;
 
+    // TODO:: Find each parameters' function
     nh.param<bool>("publish/path_en",path_en, true);
     nh.param<bool>("publish/scan_publish_en",scan_pub_en, true);
     nh.param<bool>("publish/dense_publish_en",dense_pub_en, true);
@@ -799,10 +800,17 @@ int main(int argc, char** argv)
     FOV_DEG = (fov_deg + 10.0) > 179.9 ? 179.9 : (fov_deg + 10.0);
     HALF_FOV_COS = cos((FOV_DEG) * 0.5 * PI_M / 180.0);
 
+    // 智能指针的操作：释放当前指针指向的对象，然后将指针指向一个新创建的对象。
     _featsArray.reset(new PointCloudXYZI());
 
+    // memset 的功能是将一段内存的内容按字节进行初始化
+    // 指针：指向要初始化的内存块的起始位置的指针。
+    // 值：要用来填充内存块的值，通常是一个无符号字符（unsigned char）类型的值。
+    // 大小：要初始化的内存块的大小，以字节为单位。
     memset(point_selected_surf, true, sizeof(point_selected_surf));
     memset(res_last, -1000.0f, sizeof(res_last));
+    // VoxelGrid::setLeafSize设置了一个点云滤波器（Downsampling Filter）的叶子大小（Leaf Size），该滤波器通常用于减少点云数据的密度，以提高处理效率或减少数据量。
+    // 分别表x,y,z轴方向上的叶子大小
     downSizeFilterSurf.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);
     downSizeFilterMap.setLeafSize(filter_size_map_min, filter_size_map_min, filter_size_map_min);
     memset(point_selected_surf, true, sizeof(point_selected_surf));
