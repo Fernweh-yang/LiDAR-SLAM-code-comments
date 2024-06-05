@@ -315,12 +315,13 @@ void lasermap_fov_segment()
     kdtree_delete_time = omp_get_wtime() - delete_begin;
 }
 
-// 除了AVIA类型之外的雷达点云回调函数，将数据引入到buffer当中
+// 除了livox的雷达数据之外的雷达点云回调函数
 void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg) 
 {
     mtx_buffer.lock();
     scan_count ++;
-    double preprocess_start_time = omp_get_wtime();
+    double preprocess_start_time = omp_get_wtime();                     // 预处理开始时间
+    // TODO:: XY 4雷达点云汇总的话会有点在这里被删除吗？
     if (msg->header.stamp.toSec() < last_timestamp_lidar)
     {
         ROS_ERROR("lidar loop back, clear buffer");
@@ -845,7 +846,7 @@ int main(int argc, char** argv)
     ros::init(argc, argv, "laserMapping");
     ros::NodeHandle nh;
 
-    // TODO:: Find each parameters' function
+    // TODO::XY Change the topic name of lid_topic and imu_topic in launch file
     nh.param<bool>("publish/path_en",path_en, true);                                    // 是否发布路径（所有的位姿）
     nh.param<bool>("publish/scan_publish_en",scan_pub_en, true);                        // 是否发布当前正在扫描的点云topic
     nh.param<bool>("publish/dense_publish_en",dense_pub_en, true);                      // 是否发布经过运动畸变校正注册到IMU坐标系的点云的topic，
@@ -911,6 +912,7 @@ int main(int argc, char** argv)
     HALF_FOV_COS = cos((FOV_DEG) * 0.5 * PI_M / 180.0);
 
     // 智能指针的操作：释放当前指针指向的对象，然后将指针指向一个新创建的对象。
+    // 没用到
     _featsArray.reset(new PointCloudXYZI());
 
     // memset 的功能是将一段内存的内容按字节进行初始化
@@ -929,7 +931,7 @@ int main(int argc, char** argv)
     memset(point_selected_surf, true, sizeof(point_selected_surf));
     memset(res_last, -1000.0f, sizeof(res_last));
 
-    // TODO:: set our own extrinsic
+    // TODO::XY set our own extrinsic
     // 外参在在launch中读取的avia.yaml中设置
     Lidar_T_wrt_IMU<<VEC_FROM_ARRAY(extrinT);
     Lidar_R_wrt_IMU<<MAT_FROM_ARRAY(extrinR);
@@ -949,7 +951,7 @@ int main(int argc, char** argv)
     // 通过一个函数（h_dyn_share_in）同时计算测量（z）、估计测量（h）、偏微分矩阵（h_x，h_v）和噪声协方差（R）。
     kf.init_dyn_share(get_f, df_dx, df_dw, h_share_model, NUM_MAX_ITERATIONS, epsi);
 
-    /*** debug record ***/
+    // **************** debug record ****************
     FILE *fp;
     string pos_log_dir = root_dir + "/Log/pos_log.txt";
     fp = fopen(pos_log_dir.c_str(),"w");
@@ -963,7 +965,7 @@ int main(int argc, char** argv)
     else
         cout << "~~~~"<<ROOT_DIR<<" doesn't exist" << endl;
 
-    /*** ROS subscribe initialization ***/
+    // **************** ROS subscribe initialization ****************
     // 雷达点云的订阅器sub_pcl，订阅点云的topic
     ros::Subscriber sub_pcl = p_pre->lidar_type == AVIA ? \
         nh.subscribe(lid_topic, 200000, livox_pcl_cbk) : \
@@ -989,14 +991,15 @@ int main(int argc, char** argv)
             ("/cloud_effected", 100000);
     ros::Publisher pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>
             ("/Laser_map", 100000);
-//------------------------------------------------------------------------------------------------------
+
+    // **************** Start LIO ****************
     signal(SIGINT, SigHandle);  // 中断处理函数，如果有中断信号（比如Ctrl+C），则执行第二个参数里面的SigHandle函数
     ros::Rate rate(5000);
     bool status = ros::ok();
     while (status)
     {   
-        if (flg_exit) break;   // 如果有中断产生，则结束主循环
-        ros::spinOnce();
+        if (flg_exit) break;    // 如果有中断产生，则结束主循环
+        ros::spinOnce();        
         // 如果激光雷达的数据和IMU数据需要进行时间对齐
         if(sync_packages(Measures)) 
         {   
@@ -1030,11 +1033,10 @@ int main(int argc, char** argv)
                 ROS_WARN("No point, skip this scan!\n");
                 continue;
             }
-
+            
             //判断是否初始化完成，需要满足第一次扫描的时间和第一个点云时间的差值大于INIT_TIME
-            flg_EKF_inited = (Measures.lidar_beg_time - first_lidar_time) < INIT_TIME ? \
-                            false : true;
-            /*** Segment the map in lidar FOV ***/
+            flg_EKF_inited = (Measures.lidar_beg_time - first_lidar_time) < INIT_TIME ? false : true;
+            // **************** Segment the map in lidar FOV ****************
             lasermap_fov_segment(); // 动态调整局部地图,在拿到eskf前馈结果后
 
             /*** downsample the feature points in a scan ***/
@@ -1042,7 +1044,8 @@ int main(int argc, char** argv)
             downSizeFilterSurf.filter(*feats_down_body);        //滤波降采样后的点云数据
             t1 = omp_get_wtime();
             feats_down_size = feats_down_body->points.size();   //记录滤波后的点云数量
-            /*** initialize the map kdtree ***/
+            
+            // **************** initialize the map kdtree ****************
             // 构建kd树
             if(ikdtree.Root_Node == nullptr)
             {
@@ -1067,7 +1070,7 @@ int main(int argc, char** argv)
             
             // cout<<"[ mapping ]: In num: "<<feats_undistort->points.size()<<" downsamp "<<feats_down_size<<" Map num: "<<featsFromMapNum<<"effect num:"<<effct_feat_num<<endl;
 
-            /*** ICP and iterated Kalman filter update ***/
+            // **************** ICP and iterated Kalman filter update ****************
             if (feats_down_size < 5)
             {
                 ROS_WARN("No point, skip this scan!\n");
@@ -1096,7 +1099,7 @@ int main(int argc, char** argv)
 
             t2 = omp_get_wtime();
             
-            /*** iterated state estimation ***/
+            // **************** iterated state estimation ****************
             double t_update_start = omp_get_wtime();
             double solve_H_time = 0;
             kf.update_iterated_dyn_share_modified(LASER_POINT_COV, solve_H_time);   //迭代卡尔曼滤波更新，更新地图信息
@@ -1110,22 +1113,22 @@ int main(int argc, char** argv)
 
             double t_update_end = omp_get_wtime();
 
-            /******* Publish odometry *******/
+            // **************** Publish odometry ****************
             publish_odometry(pubOdomAftMapped);
 
-            /*** add the feature points to map kdtree ***/
+            // **************** add the feature points to map kdtree ****************
             t3 = omp_get_wtime();
             map_incremental();
             t5 = omp_get_wtime();
             
-            /******* Publish points *******/
+            // **************** Publish points ****************
             if (path_en)                         publish_path(pubPath);
             if (scan_pub_en || pcd_save_en)      publish_frame_world(pubLaserCloudFull);
             if (scan_pub_en && scan_body_pub_en) publish_frame_body(pubLaserCloudFull_body);
             // publish_effect_world(pubLaserCloudEffect);
             // publish_map(pubLaserCloudMap);
 
-            /*** Debug variables ***/
+            // **************** Debug variables ****************
             if (runtime_pos_log)
             {
                 frame_num ++;
@@ -1160,7 +1163,7 @@ int main(int argc, char** argv)
         rate.sleep();
     }
 
-    /**************** save map ****************/
+    // **************** save map ****************
     /* 1. make sure you have enough memories
     /* 2. pcd save will largely influence the real-time performences **/
     if (pcl_wait_save->size() > 0 && pcd_save_en)
