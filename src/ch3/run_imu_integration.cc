@@ -1,9 +1,5 @@
-//
-// Created by xiang on 2021/11/5.
-//
-
-#include <glog/logging.h>
-#include <iomanip>
+#include <glog/logging.h>   // 日志管理工具
+#include <iomanip>  // c++标准库：主要用于格式化输入输出操作，例如设置宽度、精度、填充字符、调整字段
 
 #include "ch3/imu_integration.h"
 #include "common/io_utils.h"
@@ -24,6 +20,9 @@ int main(int argc, char** argv) {
         return -1;
     }
 
+    // TxtIO类读取了txt文件
+    // 该类使用std::function内置了针对imu,odom,gnss三种数据的回调函数
+    // 后面想处理哪种数据，就把处理函数或lambda表达式传入这些回调函数即可
     sad::TxtIO io(FLAGS_imu_txt_path);
 
     // 该实验中，我们假设零偏已知
@@ -31,6 +30,7 @@ int main(int argc, char** argv) {
     Vec3d init_bg(00.000224886, -7.61038e-05, -0.000742259);
     Vec3d init_ba(-0.165205, 0.0926887, 0.0058049);
 
+    // *************** 单纯依靠笔记公式2.1.3对IMU数据做2次积分，得到运动物体的位姿 ***************
     sad::IMUIntegration imu_integ(gravity, init_bg, init_ba);
 
     std::shared_ptr<sad::ui::PangolinWindow> ui = nullptr;

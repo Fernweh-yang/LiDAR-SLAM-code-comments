@@ -33,14 +33,20 @@ namespace sad {
  */
 class TxtIO {
    public:
+    //  构造函数使用ifstream直接读取文件
     TxtIO(const std::string &file_path) : fin(file_path) {}
 
-    /// 定义回调函数
+    // * 通过回调函数的机制允许用户定义处理不同类型的数据
+    // 1. 定义回调函数类型
     using IMUProcessFuncType = std::function<void(const IMU &)>;
     using OdomProcessFuncType = std::function<void(const Odom &)>;
     using GNSSProcessFuncType = std::function<void(const GNSS &)>;
 
+    // 2. 注册回调函数
+    // 这里的imu_proc就是类没定义的回调函数，使用时可以将对应的函数/lambda表达式等任何可调用对象传过来
+    // 所以std::function称为模板类：回调函数在这里不用实现，等着外面传进来就好
     TxtIO &SetIMUProcessFunc(IMUProcessFuncType imu_proc) {
+        // 使用 std::move 将 imu_proc 的资源移动到 imu_proc_ ，避免不必要的深拷贝操作，提高程序性能。
         imu_proc_ = std::move(imu_proc);
         return *this;
     }
@@ -55,7 +61,7 @@ class TxtIO {
         return *this;
     }
 
-    // 遍历文件内容，调用回调函数
+    // 3. 遍历文件内容，调用回调函数
     void Go();
 
    private:
