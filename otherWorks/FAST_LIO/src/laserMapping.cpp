@@ -329,7 +329,7 @@ void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg)
     }
 
     PointCloudXYZI::Ptr  ptr(new PointCloudXYZI());
-    p_pre->process(msg, ptr);                                           // 点云预处理
+    p_pre->process(msg, ptr);                                           // 点云预处理，这里会根据雷达的类型，调用preprocess.cpp中各自不同的handler。
     lidar_buffer.push_back(ptr);                                        // 将点云放入缓冲区
     time_buffer.push_back(msg->header.stamp.toSec());                   // 将时间放入缓冲区
     last_timestamp_lidar = msg->header.stamp.toSec();                   // 记录最后一个时间
@@ -426,12 +426,18 @@ bool sync_packages(MeasureGroup &meas)
     }
 
     /*** push a lidar scan ***/
+    /*
+        一个sensor_msgs::PointCloud2是雷达一次扫描。
+        meas.lidar = lidar_buffer.front(); 就保存着这一次扫描的第一个点的地址
+        meas.lidar_beg_time 就保存着这一次扫描第一个点的时间戳
+        meas.lidar_end_time 就保存着这一次扫描最后一个点的时间戳
+    */
     // 如果还没有把雷达数据放到结构体：测量meas 中的话，就执行一下操作
     if(!lidar_pushed)
     {
         meas.lidar = lidar_buffer.front();          // 从激光雷达点云缓存队列中取出点云数据，放到meas中
         meas.lidar_beg_time = time_buffer.front();  // 从时间戳队列中提取时间，放入meas中，作为该lidar测量起始的时间戳
-        if (meas.lidar->points.size() <= 1)         // time too little
+        if (meas.lidar->points.size() <= 1)         // time too little -> so no enough points
         {
             lidar_end_time = meas.lidar_beg_time + lidar_mean_scantime;
             ROS_WARN("Too few input point cloud!\n");
@@ -452,26 +458,33 @@ bool sync_packages(MeasureGroup &meas)
         lidar_pushed = true;                    // 成功提取到lidar测量的标志
     }
 
-    // 最新的IMU时间戳(也就是队尾的)不能早于雷达的end时间戳，因为last_timestamp_imu比较时是加了0.1的，所以要比较大于雷达的end时间戳
+    // 最新的IMU时间戳(也就是队尾的)不能早于雷达的end时间戳
+    // last_timestamp_imu初始值为-1.0, lidar_end_time为0
     if (last_timestamp_imu < lidar_end_time)
     {
         return false;
     }
 
     /*** push imu data, and pop from imu buffer ***/
+    /*
+        last_timestamp_imu: 是最新的imu时间, 在imu_cbk()中每有新的imu数据读入就会更新这个时间。
+        imu_buffer：和lidar_buffer一样，每有新的imu数据就会加载到这个deque类型的buffer中去。
+        imu_time：读取的是最老的那个imu数据的时间戳。
+
+        因为算法的速度限制，所以当rosbag播完last_timestamp_imu已经是一个很大的值了，imu_time和lidar_end_time还是一个很小的值
+    */ 
     double imu_time = imu_buffer.front()->header.stamp.toSec();
     meas.imu.clear();
-    // 拿出lidar_beg_time到lidar_end_time之间的所有IMU数据
-    // 如果imu缓存队列中的数据时间戳小于雷达结束时间戳，则将该数据放到meas中,代表了这一帧中的imu数据
+
+    // 拿出imu_time到lidar_end_time之间的所有IMU数据
     while ((!imu_buffer.empty()) && (imu_time < lidar_end_time))
     {
-        imu_time = imu_buffer.front()->header.stamp.toSec();    // 获取imu数据的时间戳
-        if(imu_time > lidar_end_time) break;
         meas.imu.push_back(imu_buffer.front());                 // 将imu数据放到meas中
         imu_buffer.pop_front();
+        imu_time = imu_buffer.front()->header.stamp.toSec();    // 获取最老的imu数据的时间戳
     }
 
-    lidar_buffer.pop_front();   // 将lidar数据弹出
+    lidar_buffer.pop_front();   //qu
     time_buffer.pop_front();    // 将时间戳弹出
     lidar_pushed = false;       // 将lidar_pushed置为false，代表lidar数据已经被放到meas中了
     return true;
@@ -642,6 +655,7 @@ void publish_map(const ros::Publisher & pubLaserCloudMap)
     pubLaserCloudMap.publish(laserCloudMap);
 }
 
+// ! 把滤波算出的位姿保存到out
 // 设置输出的t,q，在publish_odometry，publish_path调用
 template<typename T>
 void set_posestamp(T & out)
@@ -659,11 +673,12 @@ void set_posestamp(T & out)
 
 //发布里程计
 void publish_odometry(const ros::Publisher & pubOdomAftMapped)
-{
+{   
+    // IMU坐标系当对于世界坐标系
     odomAftMapped.header.frame_id = "camera_init";
     odomAftMapped.child_frame_id = "body";
     odomAftMapped.header.stamp = ros::Time().fromSec(lidar_end_time);// ros::Time().fromSec(lidar_end_time);
-    set_posestamp(odomAftMapped.pose);
+    set_posestamp(odomAftMapped.pose);          // 把滤波算出的位姿保存到odomAftMapped.pose
     pubOdomAftMapped.publish(odomAftMapped);
     auto P = kf.get_P();
     for (int i = 0; i < 6; i ++)
@@ -1000,6 +1015,7 @@ int main(int argc, char** argv)
     {   
         if (flg_exit) break;    // 如果有中断产生，则结束主循环
         ros::spinOnce();        
+        // 如果订阅imu和lidar数据的订阅器有消息传过来，measures就被填入相应的数据，只要不是时间戳有问题这里就会为true
         // 如果激光雷达的数据和IMU数据需要进行时间对齐
         if(sync_packages(Measures)) 
         {   
@@ -1021,6 +1037,8 @@ int main(int argc, char** argv)
             svd_time   = 0;
             t0 = omp_get_wtime();
 
+            // **************** Lidar/Imu msg forward/backward propagation ****************
+            // 处理完的点云保存在feats_undistort中
             p_imu->Process(Measures, kf, feats_undistort);  // 对IMU数据进行预处理，其中包含了点云畸变处理 前向传播 反向传播
             state_point = kf.get_x();                       // 获取kf预测的全局状态（imu）
             //世界系下雷达坐标系的位置
@@ -1036,6 +1054,7 @@ int main(int argc, char** argv)
             
             //判断是否初始化完成，需要满足第一次扫描的时间和第一个点云时间的差值大于INIT_TIME
             flg_EKF_inited = (Measures.lidar_beg_time - first_lidar_time) < INIT_TIME ? false : true;
+
             // **************** Segment the map in lidar FOV ****************
             lasermap_fov_segment(); // 动态调整局部地图,在拿到eskf前馈结果后
 
@@ -1114,6 +1133,7 @@ int main(int argc, char** argv)
             double t_update_end = omp_get_wtime();
 
             // **************** Publish odometry ****************
+            // 位姿保存在state_point中
             publish_odometry(pubOdomAftMapped);
 
             // **************** add the feature points to map kdtree ****************
