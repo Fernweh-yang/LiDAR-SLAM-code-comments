@@ -6,29 +6,29 @@
 Preprocess::Preprocess()
   :feature_enabled(0), lidar_type(AVIA), blind(0.01), point_filter_num(1)
 {
-  inf_bound = 10;
-  N_SCANS   = 6;
-  SCAN_RATE = 10;
-  group_size = 8;
-  disA = 0.01;
+  inf_bound = 10;                   // 大于10m是盲区
+  N_SCANS   = 6;                    // 雷达线数
+  SCAN_RATE = 10;                   // 扫描频率
+  group_size = 8;                   // 8个点为一组
+  disA = 0.01;                      // 点之间的距离阈值，判断是否为平面
   disA = 0.1; // B?
-  p2l_ratio = 225;
-  limit_maxmid =6.25;
+  p2l_ratio = 225;                  // 点到线的距离阈值，大于这个才能判断为面
+  limit_maxmid =6.25;               
   limit_midmin =6.25;
   limit_maxmin = 3.24;
   jump_up_limit = 170.0;
   jump_down_limit = 8.0;
   cos160 = 160.0;
-  edgea = 2;
+  edgea = 2;                        // 点与点距离超过2认为是遮挡
   edgeb = 0.1;
-  smallp_intersect = 172.5;
+  smallp_intersect = 172.5;         // 三个点如果角度大于172.5度，且比例小于1.2倍，则认为是平面
   smallp_ratio = 1.2;
   given_offset_time = false;
 
-  jump_up_limit = cos(jump_up_limit/180*M_PI);
-  jump_down_limit = cos(jump_down_limit/180*M_PI);
-  cos160 = cos(cos160/180*M_PI);
-  smallp_intersect = cos(smallp_intersect/180*M_PI);
+  jump_up_limit = cos(jump_up_limit/180*M_PI);          // 角度大于170度的点跳过
+  jump_down_limit = cos(jump_down_limit/180*M_PI);      // 角度小于8度的点跳过
+  cos160 = cos(cos160/180*M_PI);                        // 夹角限制
+  smallp_intersect = cos(smallp_intersect/180*M_PI);    // 三个点如果角度大于172.5度，且比例小于1.2倍，则认为是平面
 }
 
 Preprocess::~Preprocess() {}
@@ -37,8 +37,8 @@ void Preprocess::set(bool feat_en, int lid_type, double bld, int pfilt_num)
 {
   feature_enabled = feat_en;
   lidar_type = lid_type;
-  blind = bld;
-  point_filter_num = pfilt_num;
+  blind = bld;                      // 最小距离阈值，即过滤掉0～blind范围内的点云
+  point_filter_num = pfilt_num;     // 采样间隔，即每隔point_filter_num个点取1个点
 }
 
 void Preprocess::process(const livox_ros_driver::CustomMsg::ConstPtr &msg, PointCloudXYZI::Ptr &pcl_out)
@@ -46,7 +46,12 @@ void Preprocess::process(const livox_ros_driver::CustomMsg::ConstPtr &msg, Point
   avia_handler(msg);
   *pcl_out = pl_surf;
 }
-
+/**
+ * @brief 除livox外其他雷达的点云预处理函数
+ * 
+ * @param msg 以ros msg形式读入的雷达点云数据
+ * @param pcl_out 以pcl点云形式输出的预处理后点云数据
+ */
 void Preprocess::process(const sensor_msgs::PointCloud2::ConstPtr &msg, PointCloudXYZI::Ptr &pcl_out)
 {
   switch (time_unit)
@@ -87,17 +92,19 @@ void Preprocess::process(const sensor_msgs::PointCloud2::ConstPtr &msg, PointClo
 
 void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
 {
-  pl_surf.clear();
-  pl_corn.clear();
-  pl_full.clear();
+  pl_surf.clear();                      // 清除之前的平面点云缓存
+  pl_corn.clear();                      // 清除之前的边缘点云缓存
+  pl_full.clear();                      // 清除之前的全部点云缓存
   double t1 = omp_get_wtime();
   int plsize = msg->point_num;
   // cout<<"plsie: "<<plsize<<endl;
 
+  // 给PointCloudXYZI类的对象分配空间
   pl_corn.reserve(plsize);
   pl_surf.reserve(plsize);
   pl_full.resize(plsize);
 
+  // 单独保存每一线的点云数据
   for(int i=0; i<N_SCANS; i++)
   {
     pl_buff[i].clear();
@@ -105,6 +112,7 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
   }
   uint valid_num = 0;
   
+  // *************** Fastlio1需要做的特征提取 ***************
   if (feature_enabled)
   {
     for(uint i=1; i<plsize; i++)
@@ -154,21 +162,28 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
     time += omp_get_wtime() - t0;
     printf("Feature extraction time: %lf \n", time / count);
   }
+  // *************** Fastlio2不需要做的特征提取 ***************
   else
   {
+    // 对所个点云逐个处理
     for(uint i=1; i<plsize; i++)
     {
+      // livox特殊的点云数据msg：回波次序为0或者1的点云
       if((msg->points[i].line < N_SCANS) && ((msg->points[i].tag & 0x30) == 0x10 || (msg->points[i].tag & 0x30) == 0x00))
       {
-        valid_num ++;
+        valid_num ++; // 有效的点云数
+        // 等间隔降采样，pl_full记录所有的有效点云
         if (valid_num % point_filter_num == 0)
         {
           pl_full[i].x = msg->points[i].x;
           pl_full[i].y = msg->points[i].y;
           pl_full[i].z = msg->points[i].z;
           pl_full[i].intensity = msg->points[i].reflectivity;
+          // 把每个激光点的时间信息存储在曲率（curvature）字段中
           pl_full[i].curvature = msg->points[i].offset_time / float(1000000); // use curvature as time of each laser points, curvature unit: ms
 
+          // 当当前点云x,y,z相比上一个点云距离足够大>1e-7 + 该点到坐标系原点的距离>最小距离阈值
+          // 则认为是有用的点，保存在pl_surf中
           if(((abs(pl_full[i].x - pl_full[i-1].x) > 1e-7) 
               || (abs(pl_full[i].y - pl_full[i-1].y) > 1e-7)
               || (abs(pl_full[i].z - pl_full[i-1].z) > 1e-7))
@@ -184,14 +199,20 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
 
 void Preprocess::oust64_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
 {
+  // 清除之前的点云缓存
   pl_surf.clear();
   pl_corn.clear();
   pl_full.clear();
-  pcl::PointCloud<ouster_ros::Point> pl_orig;
+
+  // 创建一个类型为ouster_ros::Point的点云数据
+  // ouster_ros::Point是在preprocess.h中为oust64雷达自定义设计的点云类型
+  pcl::PointCloud<ouster_ros::Point> pl_orig; 
   pcl::fromROSMsg(*msg, pl_orig);
   int plsize = pl_orig.size();
   pl_corn.reserve(plsize);
   pl_surf.reserve(plsize);
+
+  // *************** Fastlio1需要做的特征提取 ***************
   if (feature_enabled)
   {
     for (int i = 0; i < N_SCANS; i++)
@@ -246,20 +267,24 @@ void Preprocess::oust64_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
       give_feature(pl, types);
     }
   }
+  // *************** Fastlio2不需要做的特征提取 ***************
   else
   {
     double time_stamp = msg->header.stamp.toSec();
     // cout << "===================================" << endl;
     // printf("Pt size = %d, N_SCANS = %d\r\n", plsize, N_SCANS);
+    // 遍历所有点云数据，找到有效的数据保存在pl_surf中
     for (int i = 0; i < pl_orig.points.size(); i++)
     {
+      // 等间隔降采样
       if (i % point_filter_num != 0) continue;
-
+      // 当前点云到原点的距离需要大于一个阈值blind
       double range = pl_orig.points[i].x * pl_orig.points[i].x + pl_orig.points[i].y * pl_orig.points[i].y + pl_orig.points[i].z * pl_orig.points[i].z;
-      
       if (range < (blind * blind)) continue;
       
       Eigen::Vector3d pt_vec;
+      // typedef pcl::PointXYZINormal PointType;
+      // 是包含强度intensity和法线normal的点云数据结构
       PointType added_pt;
       added_pt.x = pl_orig.points[i].x;
       added_pt.y = pl_orig.points[i].y;
