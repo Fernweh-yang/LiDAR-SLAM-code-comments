@@ -33,6 +33,7 @@ int main(int argc, char** argv) {
     FLAGS_colorlogtostderr = true;
     google::ParseCommandLineFlags(&argc, &argv, true);
 
+    // * 1. 使用gflags从命令行参数中读取gnss原始数据 
     if (fLS::FLAGS_txt_path.empty()) {
         return -1;
     }
@@ -42,6 +43,7 @@ int main(int argc, char** argv) {
     std::ofstream fout("./data/ch3/gnss_output.txt");
     Vec2d antenna_pos(FLAGS_antenna_pox_x, FLAGS_antenna_pox_y);
 
+    // * 2. 定义匿名函数作为后面的回调函数，用于将从gnss算出的车身位姿输出到文件中去
     auto save_result = [](std::ofstream& fout, double timestamp, const SE3& pose) {
         auto save_vec3 = [](std::ofstream& fout, const Vec3d& v) { fout << v[0] << " " << v[1] << " " << v[2] << " "; };
         auto save_quat = [](std::ofstream& fout, const Quatd& q) {
@@ -54,25 +56,28 @@ int main(int argc, char** argv) {
         fout << std::endl;
     };
 
+    // * 3. 可视化窗口
     std::shared_ptr<sad::ui::PangolinWindow> ui = nullptr;
     if (FLAGS_with_ui) {
         ui = std::make_shared<sad::ui::PangolinWindow>();
         ui->Init();
     }
 
+    // * 4. 使用TxtIO读去gnss原始数据，并用下面定义的匿名函数对其进行处理
     bool first_gnss_set = false;
     Vec3d origin = Vec3d::Zero();
     io.SetGNSSProcessFunc([&](const sad::GNSS& gnss) {
           sad::GNSS gnss_out = gnss;
+          // 4.1 经纬度转utm，并由此得到车身的世界坐标
           if (sad::ConvertGps2UTM(gnss_out, antenna_pos, FLAGS_antenna_angle)) {
               if (!first_gnss_set) {
                   origin = gnss_out.utm_pose_.translation();
                   first_gnss_set = true;
               }
 
-              /// 减掉一个原点
+              // 4.2 减掉一个原点
               gnss_out.utm_pose_.translation() -= origin;
-
+              // 4.3 调用上面定义的匿名函数来保存数据
               save_result(fout, gnss_out.unix_time_, gnss_out.utm_pose_);
 
               if (ui) {
