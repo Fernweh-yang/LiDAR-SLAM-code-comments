@@ -327,13 +327,13 @@ void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg)
         ROS_ERROR("lidar loop back, clear buffer");
         lidar_buffer.clear();
     }
-
+    // * 对点云降采样/提取特征，然后存入缓冲区
     PointCloudXYZI::Ptr  ptr(new PointCloudXYZI());
     p_pre->process(msg, ptr);                                           // 点云预处理，这里会根据雷达的类型，调用preprocess.cpp中各自不同的handler。
-    lidar_buffer.push_back(ptr);                                        // 将点云放入缓冲区
+    lidar_buffer.push_back(ptr);                                        // 将降采样或者提取了特征的点云放入缓冲区
     time_buffer.push_back(msg->header.stamp.toSec());                   // 将时间放入缓冲区
     last_timestamp_lidar = msg->header.stamp.toSec();                   // 记录最后一个时间
-    s_plot11[scan_count] = omp_get_wtime() - preprocess_start_time;     // 预处理时间
+    s_plot11[scan_count] = omp_get_wtime() - preprocess_start_time;     // 记录预处理时间
     mtx_buffer.unlock();
     sig_buffer.notify_all();                                            // 唤醒所有线程
 }
@@ -388,13 +388,12 @@ void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
     // cout<<"IMU got at: "<<msg_in->header.stamp.toSec()<<endl;
     sensor_msgs::Imu::Ptr msg(new sensor_msgs::Imu(*msg_in));
 
+    // * 一个简单的imu和lidar时间戳对齐：
+    // 在程序外手动确定lidar时间戳相比imu时间戳的间隔，在这里填平这个间隔。
     msg->header.stamp = ros::Time().fromSec(msg_in->header.stamp.toSec() - time_diff_lidar_to_imu);
-    // 将IMU和激光雷达点云的时间戳对齐
     if (abs(timediff_lidar_wrt_imu) > 0.1 && time_sync_en)
     {
-        // 将IMU时间戳对齐到激光雷达时间戳
-        msg->header.stamp = \
-        ros::Time().fromSec(timediff_lidar_wrt_imu + msg_in->header.stamp.toSec());
+        msg->header.stamp = ros::Time().fromSec(timediff_lidar_wrt_imu + msg_in->header.stamp.toSec());
     }
 
     double timestamp = msg->header.stamp.toSec();   // IMU时间戳
@@ -406,7 +405,8 @@ void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
         ROS_WARN("imu loop back, clear buffer");
         imu_buffer.clear();
     }
-    // 将当前的IMU数据保存到IMU数据缓存队列中
+
+    // * 将当前的IMU数据保存到IMU数据缓存队列中
     last_timestamp_imu = timestamp;
 
     imu_buffer.push_back(msg);
@@ -425,7 +425,7 @@ bool sync_packages(MeasureGroup &meas)
         return false;
     }
 
-    /*** push a lidar scan ***/
+    // *** 读取一帧(scan)的点云数据 ***
     /*
         一个sensor_msgs::PointCloud2是雷达一次扫描。
         meas.lidar = lidar_buffer.front(); 就保存着这一次扫描的第一个点的地址
@@ -436,7 +436,7 @@ bool sync_packages(MeasureGroup &meas)
     if(!lidar_pushed)
     {
         meas.lidar = lidar_buffer.front();          // 从激光雷达点云缓存队列中取出点云数据，放到meas中
-        meas.lidar_beg_time = time_buffer.front();  // 从时间戳队列中提取时间，放入meas中，作为该lidar测量起始的时间戳
+        meas.lidar_beg_time = time_buffer.front();  // 这一帧第一个点云时刻
         if (meas.lidar->points.size() <= 1)         // time too little -> so no enough points
         {
             lidar_end_time = meas.lidar_beg_time + lidar_mean_scantime;
@@ -453,7 +453,7 @@ bool sync_packages(MeasureGroup &meas)
             lidar_mean_scantime += (meas.lidar->points.back().curvature / double(1000) - lidar_mean_scantime) / scan_num;
         }
 
-        meas.lidar_end_time = lidar_end_time;   // 此次雷达点云结束时刻
+        meas.lidar_end_time = lidar_end_time;   // 这一帧最后一个点云时刻
 
         lidar_pushed = true;                    // 成功提取到lidar测量的标志
     }
@@ -465,7 +465,7 @@ bool sync_packages(MeasureGroup &meas)
         return false;
     }
 
-    /*** push imu data, and pop from imu buffer ***/
+    // *** push imu data, and pop from imu buffer ***
     /*
         last_timestamp_imu: 是最新的imu时间, 在imu_cbk()中每有新的imu数据读入就会更新这个时间。
         imu_buffer：和lidar_buffer一样，每有新的imu数据就会加载到这个deque类型的buffer中去。
