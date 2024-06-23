@@ -11,6 +11,7 @@
 
 namespace sad {
 
+// ! 构建树
 bool KdTree::BuildTree(const CloudPtr &cloud) {
     if (cloud->empty()) {
         return false;
@@ -22,31 +23,41 @@ bool KdTree::BuildTree(const CloudPtr &cloud) {
         cloud_[i] = ToVec3f(cloud->points[i]);
     }
 
-    Clear();
-    Reset();
+    Clear();    // 将树结构归零
+    Reset();    // 重置树结构
 
+    // * 遍历得到每个点云的的索引，并将其加入树中
+    // IndexVec = std::vector<int>;
     IndexVec idx(cloud->size());
     for (int i = 0; i < cloud->points.size(); ++i) {
         idx[i] = i;
     }
 
+    // root_是一个shared_ptr智能指针，保存着树的根节点
+    // 函数的功能是返回一个裸指针（原始指针），指向由hared_ptr 所管理的对象。这个函数不会影响引用计数。换句话说，它只是提供一个对底层对象的访问方式。
     Insert(idx, root_.get());
     return true;
 }
 
+// ! 将点云输入树结构
 void KdTree::Insert(const IndexVec &points, KdTreeNode *node) {
+    // 哈希表插入：索引-点云
     nodes_.insert({node->id_, node});
 
+    // * 点云数据没有点
     if (points.empty()) {
         return;
     }
 
+    // * 点云数据只有1个点
     if (points.size() == 1) {
         size_++;
         node->point_idx_ = points[0];
         return;
     }
 
+    // * 构建左右子树
+    // 递归调用Insert来实现建树
     IndexVec left, right;
     if (!FindSplitAxisAndThresh(points, node->axis_index_, node->split_thresh_, left, right)) {
         size_++;
@@ -54,6 +65,7 @@ void KdTree::Insert(const IndexVec &points, KdTreeNode *node) {
         return;
     }
 
+    // 创建左右子树的匿名函数
     const auto create_if_not_empty = [&node, this](KdTreeNode *&new_node, const IndexVec &index) {
         if (!index.empty()) {
             new_node = new KdTreeNode;
@@ -174,6 +186,7 @@ void KdTree::ComputeDisForLeaf(const Vec3f &pt, KdTreeNode *node,
     }
 }
 
+// ! 计算各轴的方差，然后取最大方差那个轴作为分割轴，平均数为阈值
 bool KdTree::FindSplitAxisAndThresh(const IndexVec &point_idx, int &axis, float &th, IndexVec &left, IndexVec &right) {
     // 计算三个轴上的散布情况，我们使用math_utils.h里的函数
     Vec3f var;
@@ -181,9 +194,12 @@ bool KdTree::FindSplitAxisAndThresh(const IndexVec &point_idx, int &axis, float 
     math::ComputeMeanAndCovDiag(point_idx, mean, var, [this](int idx) { return cloud_[idx]; });
     int max_i, max_j;
     var.maxCoeff(&max_i, &max_j);
+    // * 分割轴为方差最大值
     axis = max_i;
+    // * 阈值为平均值
     th = mean[axis];
 
+    // * 根据阈值和分割轴，划分该点应该加入左子树还是右子树
     for (const auto &idx : point_idx) {
         if (cloud_[idx][axis] < th) {
             // 中位数可能向左取整
@@ -193,6 +209,7 @@ bool KdTree::FindSplitAxisAndThresh(const IndexVec &point_idx, int &axis, float 
         }
     }
 
+    // * 方差检查：避免各个点的左边完全一样
     // 边界情况检查：输入的points等于同一个值，上面的判定是>=号，所以都进了右侧
     // 这种情况不需要继续展开，直接将当前节点设为叶子就行
     if (point_idx.size() > 1 && (left.empty() || right.empty())) {

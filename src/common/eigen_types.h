@@ -73,35 +73,39 @@ using IdType = unsigned long;
 // Vec2i 可用于索引，定义它的小于号，用于构建以它为key的maps
 namespace sad {
 
-/// 矢量比较
+// * 模板结构：矢量比较
 template <int N>
 struct less_vec {
+    // inline内联函数：在每个调用点上替换函数调用为函数体。这可以减少函数调用的开销，
     inline bool operator()(const Eigen::Matrix<int, N, 1>& v1, const Eigen::Matrix<int, N, 1>& v2) const;
 };
 
-/// 矢量哈希
+// * 模板结构：矢量哈希
 template <int N>
 struct hash_vec {
     inline size_t operator()(const Eigen::Matrix<int, N, 1>& v) const;
 };
 
-// 实现2D和3D的比较
+// * 实现2D和3D的比较
+// 2d
 template <>
 inline bool less_vec<2>::operator()(const Eigen::Matrix<int, 2, 1>& v1, const Eigen::Matrix<int, 2, 1>& v2) const {
     return v1[0] < v2[0] || (v1[0] == v2[0] && v1[1] < v2[1]);
 }
-
+// 3d
 template <>
 inline bool less_vec<3>::operator()(const Eigen::Matrix<int, 3, 1>& v1, const Eigen::Matrix<int, 3, 1>& v2) const {
     return v1[0] < v2[0] || (v1[0] == v2[0] && v1[1] < v2[1]) || (v1[0] == v2[0] && v1[1] == v2[1] && v1[2] < v2[2]);
 }
 
-/// @see Optimized Spatial Hashing for Collision Detection of Deformable Objects, Matthias Teschner et. al., VMV 2003
+// * 2D和3D的哈希值生成
+// 根据论文 Optimized Spatial Hashing for Collision Detection of Deformable Objects, Matthias Teschner et. al., VMV 2003 实现的哈希函数
+// 2D
 template <>
 inline size_t hash_vec<2>::operator()(const Eigen::Matrix<int, 2, 1>& v) const {
     return size_t(((v[0] * 73856093) ^ (v[1] * 471943)) % 10000000);
 }
-
+// 3D
 template <>
 inline size_t hash_vec<3>::operator()(const Eigen::Matrix<int, 3, 1>& v) const {
     return size_t(((v[0] * 73856093) ^ (v[1] * 471943) ^ (v[2] * 83492791)) % 10000000);

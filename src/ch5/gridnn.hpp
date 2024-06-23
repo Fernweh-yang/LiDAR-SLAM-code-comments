@@ -16,15 +16,15 @@
 namespace sad {
 
 /**
- * 栅格法最近邻
+ * 栅格法最近邻的模板类:根据维数来选定2D栅格还是3D体素
  * @tparam dim 模板参数，使用2D或3D栅格
  */
 template <int dim>
 class GridNN {
    public:
-    using KeyType = Eigen::Matrix<int, dim, 1>;
+    using KeyType = Eigen::Matrix<int, dim, 1>;     // 根据模板参数dim，来确定是2维还是3维的向量
     using PtType = Eigen::Matrix<float, dim, 1>;
-
+    // 用一个枚举类型来定义4种近邻关系
     enum class NearbyType {
         CENTER,  // 只考虑中心
         // for 2D
@@ -47,24 +47,25 @@ class GridNN {
         // check dim and nearby
         if (dim == 2 && nearby_type_ == NearbyType::NEARBY6) {
             LOG(INFO) << "2D grid does not support nearby6, using nearby4 instead.";
+            // 近邻关系被定义为枚举类型NearbyType
             nearby_type_ = NearbyType::NEARBY4;
         } else if (dim == 3 && (nearby_type_ != NearbyType::NEARBY6 && nearby_type_ != NearbyType::CENTER)) {
             LOG(INFO) << "3D grid does not support nearby4/8, using nearby6 instead.";
             nearby_type_ = NearbyType::NEARBY6;
         }
-
+        // 根据近邻关系和维度dim，生成对应的近邻相对方位
         GenerateNearbyGrids();
     }
 
     /// 设置点云，建立栅格
     bool SetPointCloud(CloudPtr cloud);
 
-    /// 获取最近邻
+    /// 获取某个点的最近邻
     bool GetClosestPoint(const PointType& pt, PointType& closest_pt, size_t& idx);
 
-    /// 对比两个点云
-    bool GetClosestPointForCloud(CloudPtr ref, CloudPtr query, std::vector<std::pair<size_t, size_t>>& matches);
-    bool GetClosestPointForCloudMT(CloudPtr ref, CloudPtr query, std::vector<std::pair<size_t, size_t>>& matches);
+    /// 对比得到两个点云各个点之间的最近邻
+    bool GetClosestPointForCloud(CloudPtr ref, CloudPtr query, std::vector<std::pair<size_t, size_t>>& matches);    // 单线程
+    bool GetClosestPointForCloudMT(CloudPtr ref, CloudPtr query, std::vector<std::pair<size_t, size_t>>& matches);  // 多线程
 
    private:
     /// 根据最近邻的类型，生成附近网格
@@ -77,25 +78,31 @@ class GridNN {
     float inv_resolution_ = 10.0;  // 分辨率倒数
 
     NearbyType nearby_type_ = NearbyType::NEARBY4;
+    // 栅格数据被保存在一个哈希表unordered_map中
+    // 之所以用哈希表，是因为点云是稀疏的，对应的栅格也是稀疏的，所以在没有数据的地方不必保留空的栅格
     std::unordered_map<KeyType, std::vector<size_t>, hash_vec<dim>> grids_;  //  栅格数据
     CloudPtr cloud_;
 
     std::vector<KeyType> nearby_grids_;  // 附近的栅格
 };
 
-// 实现
+// ******* 设置点云，建立栅格 *******
 template <int dim>
 bool GridNN<dim>::SetPointCloud(CloudPtr cloud) {
+    // size_t 是 C++ 中的一个无符号整数类型，用于表示大小和索引。定义在 <cstddef> 头文件中
     std::vector<size_t> index(cloud->size());
+    // std::for_each默认是单线程的顺序执行
     std::for_each(index.begin(), index.end(), [idx = 0](size_t& i) mutable { i = idx++; });
 
     std::for_each(index.begin(), index.end(), [&cloud, this](const size_t& idx) {
         auto pt = cloud->points[idx];
-        auto key = Pos2Grid(ToEigen<float, dim>(pt));
+        auto key = Pos2Grid(ToEigen<float, dim>(pt));   // 得到点云在栅格中的位置
+        // end()返回一个指向哈希表末尾（最后一个元素之后）的迭代器。
+        // 所有find()=end()就是没找到
         if (grids_.find(key) == grids_.end()) {
-            grids_.insert({key, {idx}});
+            grids_.insert({key, {idx}});    // 没找到(即该栅格索引还没建立)，就将新的键值队(栅格索引+点云索引)一起插入
         } else {
-            grids_[key].emplace_back(idx);
+            grids_[key].emplace_back(idx);  // 找到了(即该栅格索引已经建立)，就将新的值(点云索引)归入栅格索引的verctor中去
         }
     });
 
@@ -104,8 +111,13 @@ bool GridNN<dim>::SetPointCloud(CloudPtr cloud) {
     return true;
 }
 
+// ******* 空间坐标转到grid，得到空间点在栅格中的位置 *******
 template <int dim>
 Eigen::Matrix<int, dim, 1> GridNN<dim>::Pos2Grid(const Eigen::Matrix<float, dim, 1>& pt) {
+    // 使用表达式链对向量pt进行3次操作
+    // pt.array() 将向量 pt 转换为一个数组，这样可以对向量的每个元素应用元素级别的操作。
+    // round() 是一个元素级别的操作，它将数组中的每个浮点数四舍五入到最近的整数。
+    // template cast<int>() 将四舍五入后的数组中的元素从浮点数类型转换为整数类型。
     return pt.array().template round().template cast<int>();
     // Eigen::Matrix<int, dim, 1> ret;
     // for (int i = 0; i < dim; ++i) {
@@ -114,12 +126,19 @@ Eigen::Matrix<int, dim, 1> GridNN<dim>::Pos2Grid(const Eigen::Matrix<float, dim,
     // return ret;
 }
 
+// ******* 近邻关系：生成二维栅格相对位置 *******
 template <>
 void GridNN<2>::GenerateNearbyGrids() {
+    // * 1. 只考虑中心栅格
     if (nearby_type_ == NearbyType::CENTER) {
         nearby_grids_.emplace_back(KeyType::Zero());
+
+    // * 2. 考虑上下左右
     } else if (nearby_type_ == NearbyType::NEARBY4) {
+        // Vec2i = Eigen::Vector2i;
         nearby_grids_ = {Vec2i(0, 0), Vec2i(-1, 0), Vec2i(1, 0), Vec2i(0, 1), Vec2i(0, -1)};
+
+    // * 3. 考虑上下左右+4角
     } else if (nearby_type_ == NearbyType::NEARBY8) {
         nearby_grids_ = {
             Vec2i(0, 0),   Vec2i(-1, 0), Vec2i(1, 0),  Vec2i(0, 1), Vec2i(0, -1),
@@ -128,22 +147,30 @@ void GridNN<2>::GenerateNearbyGrids() {
     }
 }
 
+// ******* 近邻关系：生成三维体素相对位置 *******
 template <>
 void GridNN<3>::GenerateNearbyGrids() {
+    // * 1. 只考虑中心体素
     if (nearby_type_ == NearbyType::CENTER) {
         nearby_grids_.emplace_back(KeyType::Zero());
+    
+    // * 2. 考虑上下左右+前后
     } else if (nearby_type_ == NearbyType::NEARBY6) {
+        // KeyType = Eigen::Matrix<int, dim, 1>; 此时dim=3
         nearby_grids_ = {KeyType(0, 0, 0),  KeyType(-1, 0, 0), KeyType(1, 0, 0), KeyType(0, 1, 0),
                          KeyType(0, -1, 0), KeyType(0, 0, -1), KeyType(0, 0, 1)};
     }
 }
 
+// ******* 获取查找点的最近邻 *******
 template <int dim>
 bool GridNN<dim>::GetClosestPoint(const PointType& pt, PointType& closest_pt, size_t& idx) {
     // 在pt栅格周边寻找最近邻
+    // 1. 得到查找点在栅格中的位置
     std::vector<size_t> idx_to_check;
     auto key = Pos2Grid(ToEigen<float, dim>(pt));
 
+    // 2. 根据近邻关系，遍历查找点所在栅格的近邻栅格，将其中的点云加入到idx_to_check
     std::for_each(nearby_grids_.begin(), nearby_grids_.end(), [&key, &idx_to_check, this](const KeyType& delta) {
         auto dkey = key + delta;
         auto iter = grids_.find(dkey);
@@ -156,6 +183,7 @@ bool GridNN<dim>::GetClosestPoint(const PointType& pt, PointType& closest_pt, si
         return false;
     }
 
+    // 3. 暴力近邻搜索这些点
     // brute force nn in cloud_[idx]
     CloudPtr nearby_cloud(new PointCloudType);
     std::vector<size_t> nearby_idx;
@@ -171,6 +199,7 @@ bool GridNN<dim>::GetClosestPoint(const PointType& pt, PointType& closest_pt, si
     return true;
 }
 
+// ******* 对比得到两个点云各个点之间的最近邻 *******
 template <int dim>
 bool GridNN<dim>::GetClosestPointForCloud(CloudPtr ref, CloudPtr query,
                                           std::vector<std::pair<size_t, size_t>>& matches) {

@@ -30,6 +30,7 @@ TEST(CH5_TEST, BFNN) {
         FAIL();
     }
 
+    // 降采样：体素栅格滤波
     // voxel grid 至 0.05
     sad::VoxelGrid(first);
     sad::VoxelGrid(second);
@@ -338,11 +339,21 @@ TEST(CH5_TEST, OCTREE_KNN) {
 }
 
 int main(int argc, char** argv) {
+    // 初始化 Google glog 库。这一步通常在程序启动时调用，参数 argv[0] 是程序的名称，用于在日志文件中标识该程序。
     google::InitGoogleLogging(argv[0]);
+    // 设置日志输出的阈值。此行代码指定日志级别为 google::INFO 及其以上（即 INFO、WARNING、ERROR 和 FATAL）会被输出到标准错误（stderr）。
     FLAGS_stderrthreshold = google::INFO;
+    // 启用彩色日志输出到标准错误（stderr）。
     FLAGS_colorlogtostderr = true;
 
+    // 初始化 Google Test 框架,解析命令行参数，在命令行可以使用如下参数：
+    // --gtest_filter：指定要运行的测试用例。
+    // --gtest_output：设置输出格式和文件，例如生成 XML 报告。
+    // --gtest_repeat：重复运行测试的次数。
     testing::InitGoogleTest(&argc, argv);
+    // 解析命令行标志，参数保存在全局的 FLAGS_ 变量中。
+    // 如：DEFINE_double(ANN_alpha, 1.0, "AAN的比例因子");就可以使用FLAGS_ANN_alpha这个变量了
     google::ParseCommandLineFlags(&argc, &argv, true);
+    // 执行所有定义的测试用例TEST(TestCaseName, TestName)，返回值为 0 表示所有测试通过，非零表示至少一个测试失败
     return RUN_ALL_TESTS();
 }
