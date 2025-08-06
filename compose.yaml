@@ -1,0 +1,59 @@
+x-common-volumes: &common-volumes
+  volumes:
+    - .:/projects
+    - data_headquarters:/projects/datasets
+
+x-common-devices: &common-devices
+  devices:
+    - /dev/dri:/dev/dri
+
+x-common-envs: &common-envs
+  environment:
+    - UID=${UID:-1000}
+    # - DISPLAY=unix$DISPLAY
+    - DISPLAY=$DISPLAY
+    - QT_X11_NO_MITSHM=1
+    - NVIDIA_VISIBLE_DEVICES=all
+    - NVIDIA_DRIVER_CAPABILITIES=all
+    #      - NVIDIA_REQUIRE_CUDA=cuda>=9.0
+    - XAUTHORITY=/tmp/.docker.xauth
+
+services:
+  interview-env-ubuntu:
+    image: interview-env:ubuntu
+    container_name: interview-env-ubuntu
+    runtime: nvidia
+    network_mode: "host"
+    tty: true
+    working_dir: /projects
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ubuntu
+      args:
+        - UID=${UID:-1000}
+        - GID=${GID:-1000}
+        - BASE_IMAGE=cuda-ros-dev:11.8-noetic-conda
+    <<: [*common-volumes, *common-devices, *common-envs]
+
+  interview-env-mac:
+    image: interview-env:mac
+    container_name: interview-env-mac
+    tty: true
+    working_dir: /projects
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mac
+      args:
+        - UID=${UID:-1000}
+        - GID=${GID:-1000}
+        - BASE_IMAGE=ubuntu:20.04
+    environment:
+      - UID=${UID:-1000}
+      - QT_X11_NO_MITSHM=1
+      - XAUTHORITY=/tmp/.docker.xauth
+    <<: [*common-volumes]
+
+volumes:
+  data_headquarters:
+    name: data_headquarters
+    external: true

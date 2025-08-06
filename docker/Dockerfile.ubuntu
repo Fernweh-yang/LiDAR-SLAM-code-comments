@@ -1,0 +1,29 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE} AS dev-base
+
+# add user
+# ENV _USER docker_fake_user
+# ENV _PASSWD docker_fake_user
+# ENV _UID $UID
+# ENV _GID $GID
+
+# RUN useradd --create-home -m $_USER                                && \
+#     adduser $_USER sudo                                            && \
+#     echo "$_USER:$_PASSWD" | chpasswd                              && \
+#     usermod --shell /bin/bash $_USER                               && \
+#     usermod -aG sudo $_USER                                        && \
+#     echo "$_USER ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers.d/$_USER && \
+#     chmod 0440 /etc/sudoers.d/$_USER                               && \
+#     usermod  --uid $_UID $_USER                                    && \
+#     groupmod --gid $_GID $_USER
+
+# USER $_USER
+
+RUN sudo apt-get update && \
+    sudo apt-get install -y tzdata vim git zsh build-essential sudo apt-utils wget curl gdb gdbserver tree tig && \
+    sudo rm -rf /var/lib/apt/lists/*
+
+# FROM dev-base AS  build-env
+
+# COPY docker/install/install_ohmyzsh.sh /opt/
+# RUN CHSH=yes RUNZSH=yes KEEP_ZSHRC=yes sh /opt/install_ohmyzsh.sh
