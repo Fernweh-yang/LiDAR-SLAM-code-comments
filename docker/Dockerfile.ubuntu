@@ -23,7 +23,15 @@ RUN sudo apt-get update && \
     sudo apt-get install -y tzdata vim git zsh build-essential sudo apt-utils wget curl gdb gdbserver tree tig && \
     sudo rm -rf /var/lib/apt/lists/*
 
-# FROM dev-base AS  build-env
+RUN sudo apt-get update && \
+    sudo apt-get install -y ros-noetic-pcl-ros ros-noetic-velodyne-msgs libopencv-dev libgoogle-glog-dev libeigen3-dev \
+                            libsuitesparse-dev libpcl-dev libyaml-cpp-dev libbtbb-dev libgmock-dev unzip python3-tk && \
+    sudo rm -rf /var/lib/apt/lists/*
 
-# COPY docker/install/install_ohmyzsh.sh /opt/
-# RUN CHSH=yes RUNZSH=yes KEEP_ZSHRC=yes sh /opt/install_ohmyzsh.sh
+FROM dev-base AS  build-env
+
+COPY docker/install/install_ohmyzsh.sh /opt/
+RUN CHSH=yes RUNZSH=yes KEEP_ZSHRC=yes sh /opt/install_ohmyzsh.sh
+
+COPY docker/install/install_spdlog.sh /opt/
+RUN /opt/install_spdlog.sh

@@ -49,14 +49,14 @@ format:format-cmake format-cpp
 # COMMANDS
 ##################################################################
 build-env-ubuntu:pre-build
-	docker compose -f compose.yaml build interview-env-ubuntu
+	docker compose -f compose.yaml build slam-learning-env-ubuntu
 
 start-env-ubuntu:pre-build
-	docker compose -f compose.yaml up -d interview-env-ubuntu
+	docker compose -f compose.yaml up -d slam-learning-env-ubuntu
 
 
 build-env-mac:pre-build
-	docker compose -f compose.yaml build interview-env-mac
+	docker compose -f compose.yaml build slam-learning-env-mac
 
 start-env-mac:pre-build
-	docker compose -f compose.yaml up -d interview-env-mac
+	docker compose -f compose.yaml up -d slam-learning-env-mac
