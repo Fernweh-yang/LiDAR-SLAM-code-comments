@@ -28,10 +28,21 @@ RUN sudo apt-get update && \
                             libsuitesparse-dev libpcl-dev libyaml-cpp-dev libbtbb-dev libgmock-dev unzip python3-tk && \
     sudo rm -rf /var/lib/apt/lists/*
 
+RUN sudo apt-get update && \
+    sudo apt-get install -y libglew-dev libgl1-mesa-dev libwayland-dev libxkbcommon-dev wayland-protocols \
+                            libegl1-mesa-dev libc++-dev libepoxy-dev cmake g++ ninja-build&& \
+    sudo rm -rf /var/lib/apt/lists/*
+
 FROM dev-base AS  build-env
+
+COPY docker/install/install_spdlog.sh /opt/
+RUN /opt/install_spdlog.sh
+
+COPY docker/install/install_pangolin.sh /opt/
+RUN /opt/install_pangolin.sh
 
 COPY docker/install/install_ohmyzsh.sh /opt/
 RUN CHSH=yes RUNZSH=yes KEEP_ZSHRC=yes sh /opt/install_ohmyzsh.sh
 
-COPY docker/install/install_spdlog.sh /opt/
-RUN /opt/install_spdlog.sh
+FROM build-env AS final-env
+RUN echo "source /opt/ros/noetic/setup.zsh" >> /root/.zshrc
