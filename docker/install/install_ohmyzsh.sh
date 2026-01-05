@@ -16,7 +16,7 @@
 #   ZSH=~/.zsh sh install.sh
 #
 # Respects the following environment variables:
-#   ZDOTDIR - path to Zsh dotfiles directory (default: unset). See [1][2]
+#   ZDOTDIR - path to Zsh dotfiles directory (default: unset). See [2][2]
 #             [1] https://zsh.sourceforge.io/Doc/Release/Parameters.html#index-ZDOTDIR
 #             [2] https://zsh.sourceforge.io/Doc/Release/Files.html#index-ZDOTDIR_002c-use-of
 #   ZSH     - path to the Oh My Zsh repository folder (default: $HOME/.oh-my-zsh)

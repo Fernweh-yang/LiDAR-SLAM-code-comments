@@ -1,39 +1,21 @@
-ARG BASE_IMAGE
-FROM ${BASE_IMAGE} AS dev-base
+ARG BASE_IMAGE=osrf/ros:noetic-desktop-full
+FROM ${BASE_IMAGE} AS base-env
 
-# add user
-# ENV _USER docker_fake_user
-# ENV _PASSWD docker_fake_user
-# ENV _UID $UID
-# ENV _GID $GID
+RUN apt-get update && \
+    apt-get install -y tzdata vim git zsh build-essential sudo apt-utils wget curl gdb gdbserver tree tig && \
+    rm -rf /var/lib/apt/lists/*
 
-# RUN useradd --create-home -m $_USER                                && \
-#     adduser $_USER sudo                                            && \
-#     echo "$_USER:$_PASSWD" | chpasswd                              && \
-#     usermod --shell /bin/bash $_USER                               && \
-#     usermod -aG sudo $_USER                                        && \
-#     echo "$_USER ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers.d/$_USER && \
-#     chmod 0440 /etc/sudoers.d/$_USER                               && \
-#     usermod  --uid $_UID $_USER                                    && \
-#     groupmod --gid $_GID $_USER
-
-# USER $_USER
-
-RUN sudo apt-get update && \
-    sudo apt-get install -y tzdata vim git zsh build-essential sudo apt-utils wget curl gdb gdbserver tree tig && \
-    sudo rm -rf /var/lib/apt/lists/*
-
-RUN sudo apt-get update && \
-    sudo apt-get install -y ros-noetic-pcl-ros ros-noetic-velodyne-msgs libopencv-dev libgoogle-glog-dev libeigen3-dev \
+RUN apt-get update && \
+    apt-get install -y ros-noetic-pcl-ros ros-noetic-velodyne-msgs libopencv-dev libgoogle-glog-dev libeigen3-dev \
                             libsuitesparse-dev libpcl-dev libyaml-cpp-dev libbtbb-dev libgmock-dev unzip python3-tk && \
-    sudo rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/*
 
-RUN sudo apt-get update && \
-    sudo apt-get install -y libglew-dev libgl1-mesa-dev libwayland-dev libxkbcommon-dev wayland-protocols \
+RUN apt-get update && \
+    apt-get install -y libglew-dev libgl1-mesa-dev libwayland-dev libxkbcommon-dev wayland-protocols \
                             libegl1-mesa-dev libc++-dev libepoxy-dev cmake g++ ninja-build&& \
-    sudo rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/*
 
-FROM dev-base AS  build-env
+FROM base-env AS  dev-env
 
 COPY docker/install/install_spdlog.sh /opt/
 RUN /opt/install_spdlog.sh
@@ -41,8 +23,23 @@ RUN /opt/install_spdlog.sh
 COPY docker/install/install_pangolin.sh /opt/
 RUN /opt/install_pangolin.sh
 
+COPY docker/install/install_g2o.sh /opt/
+RUN /opt/install_g2o.sh
+
+# add user
+ARG UID=1000
+ARG GID=1000
+ENV _USER=docker_xy
+RUN (getent group $GID && groupdel $(getent group $GID | cut -d: -f1) || true) && \
+    (getent passwd $UID && userdel -f $(getent passwd $UID | cut -d: -f1) || true) && \
+    groupadd -g $GID $_USER && \
+    useradd -m -u $UID -g $GID -s /bin/zsh $_USER && \
+    echo "$_USER ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers.d/$_USER && \
+    chmod 0440 /etc/sudoers.d/$_USER
+USER $_USER
+
+
 COPY docker/install/install_ohmyzsh.sh /opt/
 RUN CHSH=yes RUNZSH=yes KEEP_ZSHRC=yes sh /opt/install_ohmyzsh.sh
 
-FROM build-env AS final-env
-RUN echo "source /opt/ros/noetic/setup.zsh" >> /root/.zshrc
+RUN echo "source /opt/ros/noetic/setup.zsh" >> ~/.zshrc
